@@ -7,4 +7,4 @@ As part of my initial learning of computational genomics in March 2020 during Co
 
 First, I performed QC and trimmed off the adaptors from the RNA-seq data. Then, I aligned the reads using Bowtie2 and obtained the counts using EMASE (https://emase.readthedocs.io/en/latest/). Once I obtained the counts, I analyzed the data further in R. 
 
-Final Results: We did not obtain a lot of peak overlaps between the two datasets (QTL and RNA expression) but the overlaps that we found were found to be significant (as determined by the Fishers exact test). 
+Final Results: We did not obtain a lot of peak overlaps (only 3) between the two datasets (QTL and RNA expression) but the overlaps that we found were found to be significant (as determined by the Fishers exact test). 
