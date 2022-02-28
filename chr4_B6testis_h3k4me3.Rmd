@@ -1,0 +1,226 @@
+---
+title: "Macfarlan Chr4 h3k4me3"
+author: "Aditya Mahadevan"
+date: "4/26/2020"
+output: html_document
+---
+### Load packages----
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = FALSE)
+setwd("~/Documents/MacFarlan chr4 B6 testis H3K4me3") #setting the working directory
+# load some libraries
+library(tidyverse) # for data manipulation and working with data frames
+library(edgeR) # for normalizing data and performing differential expression
+library(GenomicRanges) # for working with bed files in R
+```
+
+### Load data----
+
+We are going to load read counts for H3K4me3 ChIP-seq from mouse B6 testis. This data was published in part from [bioRxiv: Non-essential function of KRAB zinc finger gene clusters in retrotransposon suppression](https://www.biorxiv.org/content/10.1101/2020.01.17.910679v1.supplementary-material).
+
+These data were remapped to mm10 using bwa and peaks called with MACS 1.4.2.
+
+The peakome includes peaks identified in both WT cells and those with a region of chr4 deleted using CRISPR (KO)
+
+```{load data}
+df <- read.table(file = "H3K4me3_B6_chr4cl_Testis_peakome.txt", header = TRUE) # read counts from Macfarlan ChIP
+qtl.targets <- read.table(file = "BXD_germcells_chr4_qtl_targets_h3k4me3.txt", header = TRUE) # Chr 4 QTL targets in BXDs germ cells (not sure of the lod value of these qtl targets)
+```
+
+Our peakome has n = `r nrow(df)` peaks.
+
+### Set up useful functions for intersecting two bed files in R using GRanges ----
+```{r}
+# Function to take intersect two bed files using GRanges----
+intersect_bed <- function(x, y){
+  # load into GRanges object
+  a <- makeGRangesFromDataFrame(x, keep.extra.columns = T)
+  b <- makeGRangesFromDataFrame(y, keep.extra.columns = T)
+  # find overlaps
+  my_hit <- findOverlaps(a, b)
+  my_df  <- data.frame(b[subjectHits(my_hit)])
+}
+```
+
+
+###Normalize using Bioconductor package edgeR ----
+```{r}
+y <- DGEList(counts=df[,4:5])
+### TMM normalization
+y <- calcNormFactors(y)
+
+### Export data from DGE object
+data.cpm <- as.data.frame(cpm(y, normalized.lib.sizes = TRUE)) # export cpm with TMM normalization
+data <- round(log2(data.cpm + 1), 4) # log2 transform
+### combine normalized data with genomic regions
+df.norm <- cbind(df[,1:3], data)
+
+keep <- rowSums(cpm(y)>1) <= 2 # apply filter for peaks with cpm > 1 across both samples
+df.filter <- df.norm[keep, ]
+```
+
+### Calculate average and log2 fold change between wt and ko ----
+
+```{r}
+df.filter$ave <- (df.filter$WT+df.filter$KO)/2
+df.filter$log2FC <- df.filter$WT-df.filter$KO
+```
+
+A few plots to look at the normalized data
+
+#### Plot distribution of log2FC in form of a Histogram ----
+```{r}
+#Get Unnormalized plot
+data.noncpm <- as.data.frame(cpm(y, normalized.lib.sizes = FALSE)) # export cpm with TMM normalization
+y <- DGEList(counts=df[,4:5])
+
+### Export data from DGE object
+data.cpm <- as.data.frame(cpm(y, normalized.lib.sizes = TRUE)) # export cpm with TMM normalization
+### combine normalized data with genomic regions
+df.unnorm <- cbind(df[,1:3], data)
+data <- round(log2(data.unnorm + 1), 4) # log2 transform
+
+keep <- rowSums(cpm(y)>1) <= 2 # apply filter for peaks with cpm > 1 across both samples
+df.unfilter <- df.unnorm[keep, ]
+
+
+#hist($), breaks = 50)
+df.unfilter <- df.norm[keep, ]
+#df.unfilter$ave <- (df$WT+df$KO)/2
+#df.unfilter$log2FC <- df.filter$WT-df$KO
+hist(df.unfilter, breaks = 50)
+#hist(df.filter$log2FC, breaks = 50)
+```
+
+```{r}
+
+```
+
+Notice now that the average is around 0 opposed to prior to normalization.
+
+####MA-plot
+MA-plots plot the average vs log2FC
+
+```{r}
+plot(df.filter$ave, df.filter$log2FC, 
+     pch = 20, 
+     col = rgb(0,0,0, 0.1),
+     xlim = c(1,10),
+     ylim = c(-6,6),
+     xlab = "log2(average)",
+     ylab = "log2(WT/KO)")
+abline(h = 0, col = "black")
+abline(h = 1, col = "red", lty = 3)
+abline(h = -1, col = "red", lty = 3)
+```
+
+There are many number of peaks that are much higher in the wild-type. I propose that these are from the Chr 4 deletion region. We can also see that there are almost equal (looks similar for a naked eye) number of peaks that have more modification in the KO. These are likely the targets we are interested in since KRAB-ZFPs/Trim28 act to suppress chromatin. When you remove the suppressor, perhaps regions are now available to be opened?
+
+```{r}
+cutoff <- 2
+wt <- df.filter %>%
+  filter(log2FC > cutoff)
+knitr::kable(head(wt %>% arrange(log2FC), 20))
+```
+
+There are `r nrow(wt)` peaks with log2FC > `r cutoff` (these are `r 2^cutoff`-fold different). 
+
+How many H3K4me3 peaks are higher than 2-fold in chr4_cl knockout?
+
+After that, we can extract peaks in the knockout that are higher than 2 fold. For this we can create a variable x and use the cut off <- -1
+
+```{r}
+cutoff <- -1
+ko <- df.filter %>%
+  filter(log2FC < cutoff)
+nrow(ko)
+knitr::kable(head(ko %>% arrange(log2FC), 20))
+
+#k = ko %>% select(chr, start, end, WT, KO, ave, log2FC) %>% filter (KO>2) 
+#write.table(k, file="H3K4me3_B6_testis_chr4cl_KO_2foldhigher", sep="\t", row.names = FALSE, quote = FALSE)
+``` 
+There are 167 peaks in the KO that are more than the above criteria of 2 fold 
+
+Now lets see how many of these KO peaks are present in our Chr4 QTL list. Just remember this QTL list is from BXD germ cells and the peakome data is from B6 germ cells. Check if there's any difference expected from the results. I hope there is no problem in comparing these two. Probably less differences due to the strain differences??
+
+```{r}
+ko.qtl <- intersect_bed(ko, qtl.targets)
+
+peakome.qtl <- intersect_bed(df, qtl.targets)
+```
+
+There are `r nrow(ko.qtl)` peaks found overlapping between the two data sets. This certainly doesn't seem like a whole heck of a lot. Perhaps we should calculate if this overlap is enriched by chance. To do this we will use a fisher exact test to ask significance of overlap compared to all peaks.
+
+```{r}
+a <- nrow(ko.qtl) # overlap Chr 4 QTL and KO peaks
+b <- nrow(peakome.qtl) - a # overlap peakome and Chr 4 QTL
+c <- nrow(ko) - a # KO not overlap
+d <- nrow(df) - nrow(peakome.qtl) # peakome not in Chr 4 QTL
+
+test <- fisher.test(matrix(c(a,b,c,d), nrow = 2, ncol = 2), alternative = "greater")
+```
+
+There is a significant overlap between the peaks that go up in the KO compared to WT with regions of the genome we have identified through QTL mapping as being controlled by a QTL on Chr 4 (-10log10(p-value) = `r -10*log(test$p.value, 10)`, Odds Ratio = `r round(test$estimate, 2)`).
+
+How would this look if we used the Chr 4 QTL targets
+
+```{r}
+chr4.targets <- read.table(file = "BXD_germcells_chr4_qtl_targets_h3k4me3.txt", header = TRUE)
+ko.qtl <- intersect_bed(ko, chr4.targets)
+peakome.qtl <- intersect_bed(df, chr4.targets)
+a <- nrow(ko.qtl) # overlap Chr 4 QTL and KO peaks
+b <- nrow(peakome.qtl) - a # overlap peakome and ch4 QTL minus support
+c <- nrow(ko) - a # KO not overlap with QTL
+d <- nrow(df) - nrow(peakome.qtl) - a # peaks in peakome not in KO-QTL overlap file
+
+test <- fisher.test(matrix(c(a,b,c,d), nrow = 2, ncol = 2), alternative = "greater")
+test
+```
+#How about we look at the overlap with different QTL taken from testis data (chr13).
+
+chr13.targets <- read.table(file = "BXD_germcells_chr13_qtl_targets_h3k4me3.txt", header = TRUE)
+ko.qtl13 <- intersect_bed(ko, chr13.targets)
+peakome.qtl13 <- intersect_bed(df, chr13.targets)
+a <- nrow(ko.qtl13) # overlap Chr 13 QTL and KO peaks
+b <- nrow(peakome.qtl13) - a # overlap peakome and ch13 QTL minus support
+c <- nrow(ko) - a # KO not overlap with QTL
+d <- nrow(df) - nrow(peakome.qtl) - a # peaks in peakome not in KO-QTL overlap file
+
+test <- fisher.test(matrix(c(a,b,c,d), nrow = 2, ncol = 2), alternative = "greater")
+test
+
+```
+
+```{r}
+#Create a data of random variables of peakome data (13 peaks only)
+solution <- data.frame(matrix(nrow = 1000, ncol = 2))
+colnames(solution) <- c("pvalue", "overlap")
+
+set.seed(13)
+
+#m <- replicate(1000, df[sample(nrow(df), 13), ], simplify=FALSE)
+#Random sampling of 10 observations from peakome and computing overlap using Fisher's & p-value
+#chr4.targets <- read.table(file = "BXD_germcells_chr4_qtl_targets_h3k4me3.txt", header = TRUE)
+#ko.qtl <- intersect_bed(ko, chr4.targets)
+#peakome.qtl <- intersect_bed(m, chr4.targets)
+#Create a for loop for every row in dataframe; generate a p value and save it 
+for (i in 1000) {
+  result1 <- sample_n(df.filter, nrow(ko))
+  result1.qtl <- intersect_bed(result1, qtl.targets)
+  peakome.qtl <- intersect_bed(df, qtl.targets)
+a <- nrow(ko.qtl) # overlap Chr 4 QTL and KO peaks
+b <- nrow(peakome.qtl) - a # overlap peakome and ch4 QTL minus support
+c <- nrow(ko) - a # KO not overlap with QTL
+d <- nrow(df) - nrow(peakome.qtl) - a # peaks in peakome not in KO-QTL overlap file
+test1 <- fisher.test(matrix(c(a,b,c,d), nrow = 2, ncol = 2), alternative = "greater")
+  solution[i,1] <- test$p.value
+  solution[i,2] <- a }
+
+#save_results <- 
+
+hist(solution$pvalue, main = "Histogram of P-value distribution of overlap of eQTL with random peakome rows", breaks = 6, xlab = "P-value")
+
+```
+
+
